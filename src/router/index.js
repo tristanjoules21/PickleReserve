@@ -6,8 +6,10 @@ import DashboardView from "../views/admin/AdminCourtsView.vue";
 import AdminView from "../views/admin/AdminDashboardView.vue";
 import AdminReservationView from "../views/admin/AdminReservationView.vue";
 import AdminCustomerView from "../views/admin/AdminCustomerView.vue";
+import AdminSettingsView from "../views/admin/AdminSettingsView.vue";
 import BookingPageView from "../views/user/BookingPageView.vue";
 import BookingFormView from "../views/user/BookingFormView.vue";
+import { getAuthToken, getAuthUser } from "../services/auth";
 
 const routes = [
   {
@@ -24,11 +26,13 @@ const routes = [
   },
   {
     path: "/dashboard",
-    component: DashboardView
+    component: DashboardView,
+    meta: { requiresAdmin: true }
   },
   {
     path: "/admin",
-    component: AdminView
+    component: AdminView,
+    meta: { requiresAdmin: true }
   },
   {
     path: "/book",
@@ -54,7 +58,8 @@ const routes = [
   },
   {
     path: "/customers",
-    component: AdminCustomerView
+    component: AdminCustomerView,
+    meta: { requiresAdmin: true }
   },
   {
     path: "/notifications",
@@ -66,17 +71,28 @@ const routes = [
   },
   {
     path: "/reservations",
-    component: AdminReservationView
+    component: AdminReservationView,
+    meta: { requiresAdmin: true }
   },
   {
     path: "/settings",
-    redirect: "/dashboard"
+    component: AdminSettingsView,
+    meta: { requiresAdmin: true }
   }
 ];
 
 const router = createRouter({
   history: createWebHistory(),
   routes
+});
+
+router.beforeEach((to) => {
+  if (!to.meta.requiresAdmin) return true;
+
+  const user = getAuthUser();
+  if (getAuthToken() && String(user?.role).toUpperCase() === "ADMIN") return true;
+
+  return { path: "/login", query: { redirect: to.fullPath } };
 });
 
 export default router;

@@ -1,113 +1,102 @@
-<script setup>
-import { useRouter } from "vue-router";
-import LoginVisual from "../../components/auth/LoginVisual.vue";
-import RegisterForm from "../../components/auth/RegisterForm.vue";
-
-const router = useRouter();
-
-function submitRegister() {
-  alert("Account created!");
-  router.push("/login");
-}
-</script>
-
 <template>
   <div class="auth-page">
     <LoginVisual />
     <main class="login-panel">
-      <div class="login-card">
-        <router-link to="/" class="back-link">← Back to home</router-link>
-        <h1>Create your account</h1>
-        <p class="subtext">Start booking courts in minutes.</p>
-        <RegisterForm @submit="submitRegister" />
-        <p class="register-copy">
-          Already have an account?
-          <router-link to="/login">Log in</router-link>
+      <section class="notice-card">
+        <p class="eyebrow"><span aria-hidden="true"></span> Admin accounts</p>
+        <h1>Registration is disabled<span>.</span></h1>
+        <p>
+          Administrator accounts are created securely by the system administrator.
+          Contact them if you need access to the dashboard.
         </p>
-        <p class="admin-copy">
-          Admin?
-          <router-link to="/admin">Go to admin panel</router-link>
-        </p>
-      </div>
+        <router-link class="back-link" to="/login">Return to admin login</router-link>
+      </section>
     </main>
   </div>
 </template>
 
+<script setup>
+import LoginVisual from "../../components/auth/LoginVisual.vue";
+</script>
+
 <style scoped>
 .auth-page {
-  min-height: 100vh;
   display: flex;
-  background: white;
+  min-height: 100vh;
+  min-height: 100svh;
+  background: #0f172a;
 }
 
 .login-panel {
-  width: 50%;
   display: flex;
+  width: 50%;
+  min-height: 100vh;
   align-items: center;
   justify-content: center;
-  padding: 40px;
-  background: #f8fafc;
+  padding: clamp(32px, 6vw, 88px);
+  background:
+    radial-gradient(ellipse at 85% 12%, rgba(132, 204, 22, 0.09), transparent 34rem),
+    radial-gradient(ellipse at 0% 78%, rgba(56, 91, 141, 0.1), transparent 34rem),
+    #0f172a;
 }
 
-.login-card {
-  width: min(100%, 486px);
+.notice-card {
+  width: min(100%, 460px);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  color: #a3b0c2;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.eyebrow span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a3e635;
+  box-shadow: 0 0 0 4px rgba(163, 230, 53, 0.14);
+}
+
+h1 {
+  margin: 0 0 14px;
+  color: #f8fafc;
+  font-size: clamp(2.1rem, 3.5vw, 2.8rem);
+  font-weight: 750;
+  letter-spacing: -0.055em;
+  line-height: 1.08;
+}
+
+h1 span {
+  color: #a3e635;
+}
+
+.notice-card > p:not(.eyebrow) {
+  margin: 0;
+  color: #a3b0c2;
+  font-size: 0.98rem;
+  line-height: 1.7;
 }
 
 .back-link {
   display: inline-flex;
-  align-items: center;
-  margin-bottom: 50px;
-  color: #64748b;
-  text-decoration: none;
-  font-size: 0.95rem;
-}
-
-.back-link:hover {
-  color: #156d59;
-}
-
-.login-card h1 {
-  margin: 0 0 12px;
-  font-size: 2rem;
-  color: #0f172a;
-}
-
-.subtext {
-  margin: 0 0 30px;
-  font-size: 0.95rem;
-  color: #64748b;
-}
-
-.register-copy,
-.admin-copy {
-  text-align: center;
-  color: #64748b;
-}
-
-.register-copy {
-  margin: 28px 0 0;
-  font-size: 0.9rem;
-}
-
-.admin-copy {
-  margin-top: 20px;
-  font-size: 0.85rem;
-  color: #94a3b8;
-}
-
-.register-copy a {
-  color: #16a34a;
+  margin-top: 30px;
+  color: #a3e635;
   font-weight: 700;
-}
-
-.admin-copy a {
-  color: #475569;
   text-decoration: none;
 }
 
-.register-copy a:hover,
-.admin-copy a:hover {
+.back-link:hover,
+.back-link:focus-visible {
+  color: #bef264;
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 @media (max-width: 800px) {
@@ -117,6 +106,9 @@ function submitRegister() {
 
   .login-panel {
     width: 100%;
+    min-height: auto;
+    flex: 1;
+    padding: 48px 24px 56px;
   }
 }
 </style>

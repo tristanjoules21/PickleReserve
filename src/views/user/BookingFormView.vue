@@ -1,6 +1,8 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import PickleReserveLogo from '@/components/ui/PickleReserveLogo.vue'
+import api from '@/services/api'
 
 const STORAGE_KEY = 'picklereserve.pending-booking'
 
@@ -16,6 +18,8 @@ function readBooking() {
 const booking = readBooking()
 const submitted = ref(false)
 const confirmationCode = ref('')
+const isSubmitting = ref(false)
+const submissionError = ref('')
 const form = reactive({
 	fullName: '',
 	email: '',
@@ -34,18 +38,97 @@ const formattedDate = computed(() => {
 	}).format(new Date(`${booking.date}T00:00:00`))
 })
 
-function submitBooking() {
-	if (!booking || !booking.slots.length) return
+function formatDateTime(date) {
+	const year = date.getFullYear()
+	const month = String(date.getMonth() + 1).padStart(2, '0')
+	const day = String(date.getDate()).padStart(2, '0')
+	const hours = String(date.getHours()).padStart(2, '0')
 
-	confirmationCode.value = `PR-${Date.now().toString().slice(-7)}`
-	sessionStorage.setItem(`${STORAGE_KEY}.confirmation`, JSON.stringify({
-		...booking,
-		customer: { ...form },
-		confirmationCode: confirmationCode.value,
-		status: 'Pending payment'
-	}))
-	sessionStorage.removeItem(STORAGE_KEY)
-	submitted.value = true
+	return `${year}-${month}-${day} ${hours}:00:00`
+}
+
+function normalizeCourtName(value) {
+	return String(value ?? '').trim().toLowerCase()
+}
+
+function getSlotTimes(slot) {
+	if (!Number.isInteger(slot.row) || slot.row < 0 || slot.row >= 22) {
+		throw new Error('One of the selected time slots is invalid. Please choose your schedule again.')
+	}
+
+	const dateValue = String(booking?.date ?? '').trim()
+	const start = new Date(`${dateValue}T00:00:00`)
+	if (!dateValue || Number.isNaN(start.getTime())) {
+		throw new Error('The selected date is invalid. Please choose your schedule again.')
+	}
+
+	start.setHours(6 + slot.row, 0, 0, 0)
+	const end = new Date(start)
+	end.setHours(end.getHours() + 1)
+
+	return {
+		start_time: formatDateTime(start),
+		end_time: formatDateTime(end)
+	}
+}
+
+async function submitBooking() {
+	if (!booking || !booking.slots.length || isSubmitting.value) return
+
+	submissionError.value = ''
+	isSubmitting.value = true
+
+	try {
+		const { data: courts } = await api.get('/courts')
+		const activeCourts = Array.isArray(courts) ? courts.filter((court) => court.is_active) : []
+		const selectedBookings = booking.slots.map((slot) => {
+			const courtName = normalizeCourtName(slot?.court)
+			const court = activeCourts.find((item) =>
+				slot?.courtId != null
+					? String(item.id) === String(slot.courtId)
+					: normalizeCourtName(item.name) === courtName
+			)
+
+			if (!court) {
+				throw new Error((slot?.court ?? 'Selected court') + ' is not configured as an active court. Please contact the venue.')
+			}
+
+			return {
+				court_id: court.id,
+				...getSlotTimes(slot)
+			}
+		})
+
+		const response = await api.post('/bookings', {
+			customer_name: form.fullName,
+			customer_email: form.email,
+			customer_phone: form.phone,
+			payment_method: form.paymentMethod,
+			notes: form.notes || null,
+			bookings: selectedBookings
+		})
+
+		confirmationCode.value = `PR-${Date.now().toString().slice(-7)}`
+		sessionStorage.setItem(`${STORAGE_KEY}.confirmation`, JSON.stringify({
+			...booking,
+			customer: { ...form },
+			bookingIds: response.data.bookings.map((item) => item.id),
+			confirmationCode: confirmationCode.value,
+			status: 'Pending'
+		}))
+		sessionStorage.removeItem(STORAGE_KEY)
+		submitted.value = true
+	} catch (error) {
+		console.error('Failed to submit reservation:', error)
+		const validationErrors = error.response?.data?.errors
+		submissionError.value =
+			Object.values(validationErrors || {}).flat()[0] ||
+			error.response?.data?.message ||
+			error.message ||
+			'The reservation could not be saved. Please try again.'
+	} finally {
+		isSubmitting.value = false
+	}
 }
 </script>
 
@@ -53,8 +136,7 @@ function submitBooking() {
 	<main class="form-page">
 		<header class="topbar">
 			<RouterLink class="brand" to="/book" aria-label="Back to PickleReserve booking">
-				<span class="brand-mark">P</span>
-				<span>Pickle<span class="brand-accent">Reserve</span></span>
+				<PickleReserveLogo />
 			</RouterLink>
 			<span class="step-label">{{ submitted ? 'Request received' : 'Booking details' }}</span>
 		</header>
@@ -123,7 +205,11 @@ function submitBooking() {
 					</label>
 
 					<p class="form-note">Submitting sends a reservation request. Online payment is not connected yet, so your time is confirmed after the venue verifies payment.</p>
-					<button class="primary-button submit-button" type="submit">Submit reservation request <span aria-hidden="true">→</span></button>
+					<p v-if="submissionError" class="submission-error" role="alert">{{ submissionError }}</p>
+					<button class="primary-button submit-button" type="submit" :disabled="isSubmitting">
+						{{ isSubmitting ? 'Submitting...' : 'Submit reservation request' }}
+						<span v-if="!isSubmitting" aria-hidden="true">→</span>
+					</button>
 				</form>
 			</section>
 
@@ -133,12 +219,12 @@ function submitBooking() {
 				<p class="location">Cagayan de Oro City</p>
 				<div class="summary-date"><span class="summary-icon">▦</span><strong>{{ formattedDate }}</strong></div>
 				<div class="slot-list">
-					<div v-for="(slot, index) in booking.slots" :key="`${slot.court}-${slot.row}-${index}`" class="slot-item">
+					<div v-for="(slot, index) in booking.slots" :key="`${slot.courtId ?? slot.court}-${slot.row}-${index}`" class="slot-item">
 						<span><strong>{{ slot.court }}</strong><small>{{ slot.time }}</small></span>
-						<strong>₱{{ booking.price }}</strong>
+						<strong>₱{{ Number(slot.price ?? booking.price).toFixed(2) }}</strong>
 					</div>
 				</div>
-				<div class="total-row"><span>{{ booking.slots.length }} {{ booking.slots.length === 1 ? 'hour' : 'hours' }}</span><strong>₱{{ booking.total }}</strong></div>
+				<div class="total-row"><span>{{ booking.slots.length }} {{ booking.slots.length === 1 ? 'hour' : 'hours' }}</span>				<strong>₱{{ Number(booking.total).toFixed(2) }}</strong></div>
 				<p class="rate-note">₱{{ booking.price }} per court-hour</p>
 			</aside>
 		</div>
@@ -150,9 +236,7 @@ function submitBooking() {
 * { box-sizing: border-box; }
 .form-page { width: min(100%, 520px); min-height: 100vh; margin: 0 auto; }
 .topbar { height: 68px; padding: 0 max(24px, calc((100vw - 1120px) / 2)); background: #fff; border-bottom: 1px solid #e3eae6; display: flex; align-items: center; justify-content: space-between; }
-.brand { display: inline-flex; align-items: center; gap: 10px; color: #18382b; font-size: 17px; font-weight: 750; text-decoration: none; }
-.brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; background: #087c52; color: white; }
-.brand-accent { color: #087c52; }
+.brand { display: inline-flex; align-items: center; color: #18382b; text-decoration: none; }
 .step-label { color: #67766e; font-size: 13px; }
 .content-grid { width: 100%; margin: 0; padding: 24px 14px 36px; display: flex; flex-direction: column; gap: 24px; align-items: stretch; }
 .page-heading { margin-bottom: 30px; }
@@ -182,6 +266,8 @@ input:focus, select:focus, textarea:focus { border-color: #16895e; box-shadow: 0
 .primary-button { min-height: 48px; padding: 0 18px; border: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; background: #087c52; color: #fff; font: inherit; font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; }
 .primary-button:hover { background: #066a46; }
 .submit-button { width: 100%; }
+.submit-button:disabled { opacity: 0.7; cursor: wait; }
+.submission-error { margin: -12px 0 0; color: #b42318; font-size: 13px; line-height: 1.5; }
 .summary-panel { order: -1; padding: 18px; border: 1px solid #dfe7e2; border-radius: 8px; background: #fff; }
 .summary-panel h2 { margin: 0; font-size: 19px; }
 .location { margin: 5px 0 20px; color: #748078; font-size: 12px; }

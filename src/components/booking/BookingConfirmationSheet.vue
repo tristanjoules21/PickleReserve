@@ -12,10 +12,6 @@ const props = defineProps({
     type: Array,
     required: true,
   },
-  price: {
-    type: Number,
-    required: true,
-  },
   total: {
     type: Number,
     required: true,
@@ -48,15 +44,15 @@ function formatDate(date) {
       <p class="sheet-date">{{ formatDate(props.selectedDate) }}</p>
 
       <div class="selected-list">
-        <div v-for="slot in props.selection" :key="`${slot.court}-${slot.row}`">
-          <span>{{ slot.court }} · {{ props.timeRows[slot.row] }}</span>
-          <strong>₱{{ props.price }}</strong>
+        <div v-for="slot in props.selection" :key="`${slot.court.id}-${slot.row}`">
+          <span>{{ slot.court.name }} · {{ props.timeRows[slot.row] }}</span>
+          <strong>₱{{ Number(slot.court.price_per_hour).toFixed(2) }}</strong>
         </div>
       </div>
 
       <div class="sheet-total">
         <span>Total</span>
-        <strong>₱{{ props.total }}</strong>
+        <strong>₱{{ props.total.toFixed(2) }}</strong>
       </div>
 
       <button type="button" class="confirm" @click="emit('confirm')">Confirm & Pay</button>
@@ -70,7 +66,7 @@ function formatDate(date) {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(11, 18, 15, 0.35);
+  background: rgba(2, 8, 23, 0.65);
   z-index: 40;
 }
 
@@ -80,16 +76,17 @@ function formatDate(date) {
   right: 0;
   bottom: 0;
   z-index: 50;
-  background: white;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 24px 24px 0 0;
   padding: 14px 16px 24px;
-  box-shadow: 0 -8px 24px rgba(16, 24, 23, 0.1);
+  box-shadow: 0 -12px 28px rgba(2, 8, 23, 0.4);
 }
 
 .sheet-handle {
   width: 50px;
   height: 5px;
-  background: #dfe7e4;
+  background: rgba(148, 163, 184, 0.5);
   border-radius: 999px;
   margin: 0 auto 12px;
 }
@@ -104,18 +101,19 @@ function formatDate(date) {
 .sheet-header h2 {
   margin: 0;
   font-size: 20px;
+  color: #f8fafc;
 }
 
 .sheet-header button {
   background: transparent;
   border: none;
   font-size: 30px;
-  color: #56615d;
+  color: #cbd5e1;
 }
 
 .sheet-date {
   margin: 0 0 14px;
-  color: #65716d;
+  color: #cbd5e1;
   font-size: 13px;
 }
 
@@ -131,22 +129,23 @@ function formatDate(date) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #f6faf7;
-  border: 1px solid #edf0ef;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.12);
   border-radius: 12px;
   padding: 10px 12px;
   font-size: 13px;
-  color: #37413e;
+  color: #e2e8f0;
 }
 
 .sheet-total {
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid #edf0ef;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
   display: flex;
   justify-content: space-between;
   font-size: 15px;
   font-weight: 700;
+  color: #f8fafc;
 }
 
 .confirm {
@@ -155,15 +154,15 @@ function formatDate(date) {
   min-height: 48px;
   border: none;
   border-radius: 14px;
-  background: #16895e;
-  color: white;
-  font-weight: 700;
+  background: linear-gradient(135deg, #dfff00 0%, #a3e635 100%);
+  color: #020817;
+  font-weight: 800;
 }
 
 .cancel-note {
   margin: 10px 0 0;
   text-align: center;
-  color: #78837f;
+  color: #94a3b8;
   font-size: 11px;
 }
 </style>

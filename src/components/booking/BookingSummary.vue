@@ -24,7 +24,7 @@ const emit = defineEmits(['open-sheet'])
         }}
       </span>
 
-      <strong>₱{{ props.total }}</strong>
+      <strong>₱{{ props.total.toFixed(2) }}</strong>
     </div>
 
     <button type="button" class="select-button" :disabled="!props.selection.length" @click="emit('open-sheet')">
@@ -41,33 +41,35 @@ const emit = defineEmits(['open-sheet'])
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
-  max-width: 520px;
+  max-width: 560px;
   min-height: 84px;
-  padding: 12px 13px;
+  padding: 12px 14px;
   display: flex;
   align-items: center;
-  gap: 13px;
-  background: rgba(255, 255, 255, 0.97);
-  border-top: 1px solid #e3e9e6;
-  box-shadow: 0 -4px 16px rgba(15, 30, 24, 0.06);
+  gap: 12px;
+  background: rgba(2, 8, 23, 0.82);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: 0 -12px 28px rgba(2, 8, 23, 0.4);
 }
 
 .booking-total {
-  min-width: 126px;
+  min-width: 136px;
   display: flex;
   flex-direction: column;
 }
 
 .booking-total span {
-  color: #77817e;
+  color: #94a3b8;
   font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 .booking-total strong {
-  margin-top: 4px;
+  margin-top: 5px;
   font-size: 24px;
-  letter-spacing: -0.6px;
-  color: #111b18;
+  letter-spacing: -0.7px;
+  color: #f8fafc;
 }
 
 .select-button {
@@ -75,13 +77,15 @@ const emit = defineEmits(['open-sheet'])
   min-height: 48px;
   border: none;
   border-radius: 14px;
-  background: #16895e;
-  color: white;
-  font-weight: 700;
+  background: linear-gradient(135deg, #dfff00 0%, #a3e635 100%);
+  color: #020817;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(163, 230, 53, 0.2);
 }
 
 .select-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 </style>

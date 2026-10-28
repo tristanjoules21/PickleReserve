@@ -1,5 +1,6 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import api from '@/services/api'
 
 const props = defineProps({
   courts: {
@@ -56,12 +57,17 @@ const dateInput = ref(null)
 const today = new Date()
 today.setHours(0, 0, 0, 0)
 
-function formatInputDate(date) {
-  const currentDate = new Date(date)
-  const year = currentDate.getFullYear()
-  const month = String(currentDate.getMonth() + 1).padStart(2, '0')
-  const day = String(currentDate.getDate()).padStart(2, '0')
+const reservedSlots = ref([])
+const isLoadingSlots = ref(false)
+let pollInterval = null
 
+// Format Date to YYYY-MM-DD using local time
+function formatInputDate(date) {
+  if (!date) return ''
+  const d = new Date(date)
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
 
@@ -82,20 +88,126 @@ function openDatePicker() {
 
 function handleDateChange(event) {
   const value = event.target.value
-
   if (value) {
     props.updateSelectedDate(value)
   }
 }
+
+// Fetch reserved/taken slots from backend for current date
+const fetchReservedSlots = async () => {
+  isLoadingSlots.value = true
+  try {
+    const formattedDate = formatInputDate(props.selectedDate)
+    const response = await api.get('/bookings/reserved-slots', {
+      params: { date: formattedDate }
+    })
+    reservedSlots.value = Array.isArray(response.data) ? response.data : []
+    console.log('[BookingSchedule] Reserved slots loaded:', reservedSlots.value)
+  } catch (error) {
+    console.error('[BookingSchedule] Failed to load reserved slots:', error)
+  } finally {
+    isLoadingSlots.value = false
+  }
+}
+
+// Convert "6AM - 7AM" or "6AM – 7AM" to two-digit 24h start hour ("06")
+function getHourFromLabel(timeLabel) {
+  if (!timeLabel) return ''
+  const firstPart = timeLabel.split('–')[0].split('-')[0].trim()
+  const match = firstPart.match(/(\d+)(?::(\d+))?\s*(AM|PM)?/i)
+  if (!match) return ''
+
+  let hour = parseInt(match[1], 10)
+  const modifier = match[3] ? match[3].toUpperCase() : null
+
+  if (modifier === 'PM' && hour < 12) hour += 12
+  if (modifier === 'AM' && hour === 12) hour = 0
+
+  return String(hour).padStart(2, '0')
+}
+
+// Extract Court Index/ID from string ("Court 1" -> "1") or object
+function getCourtId(court, courtIndex) {
+  if (typeof court === 'object' && court !== null) {
+    return String(court.id)
+  }
+  const match = String(court).match(/\d+/)
+  if (match) return match[0]
+  // Fallback to 1-based index if name doesn't contain a number
+  return String(courtIndex + 1)
+}
+
+// Extract HH from start_time string ("2026-10-19 06:00:00" or ISO format)
+function getBookingHour(startTimeStr) {
+  if (!startTimeStr) return ''
+  const str = String(startTimeStr)
+  if (str.includes('T')) {
+    return str.split('T')[1].split(':')[0]
+  }
+  if (str.includes(' ')) {
+    return str.split(' ')[1].split(':')[0]
+  }
+  const d = new Date(startTimeStr)
+  return String(d.getHours()).padStart(2, '0')
+}
+
+// Check if a slot is reserved by database record or parent state
+function isSlotDisabled(court, rowIndex) {
+  // Check parent status prop
+  const parentStatus = props.getStatus(court, rowIndex)
+  if (parentStatus === 'booked' || parentStatus === 'pending') {
+    return true
+  }
+
+  // Determine Court ID & Hour for current slot cell
+  const courtIndex = props.courts.indexOf(court)
+  const targetCourtId = getCourtId(court, courtIndex)
+  const targetHourStr = getHourFromLabel(props.timeRows[rowIndex])
+
+  if (!targetHourStr) return false
+
+  // Match against database records
+  return reservedSlots.value.some((booking) => {
+    const bookingCourtId = String(booking.court_id || booking.court?.id || '')
+    const bookingHourStr = getBookingHour(booking.start_time)
+
+    const isCourtMatch = bookingCourtId === targetCourtId
+    const isHourMatch = bookingHourStr === targetHourStr
+
+    return isCourtMatch && isHourMatch
+  })
+}
+
+// Safely handle clicks
+function handleSlotClick(court, rowIndex) {
+  if (isSlotDisabled(court, rowIndex)) {
+    return // Block selection completely
+  }
+  props.toggleSlot(court, rowIndex)
+}
+
+// Auto-refresh when tab gains focus or on mount/date change
+watch(() => props.selectedDate, fetchReservedSlots, { immediate: true })
+
+onMounted(() => {
+  fetchReservedSlots()
+  window.addEventListener('focus', fetchReservedSlots)
+  pollInterval = setInterval(fetchReservedSlots, 10000) // Poll every 10s
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', fetchReservedSlots)
+  if (pollInterval) clearInterval(pollInterval)
+})
+
+defineExpose({ fetchReservedSlots })
 </script>
 
 <template>
   <section class="booking">
     <div class="instruction">
       <div class="info-circle">i</div>
-      <p>
-        Tap a slot to select or deselect an hour.
-      </p>
+      <p>Tap a slot to select or deselect an hour.</p>
     </div>
 
     <div class="date-selector">
@@ -123,29 +235,21 @@ function handleDateChange(event) {
 
     <div class="legend">
       <div>
-        <span class="legend-dot free"></span>
-        Free
+        <span class="legend-dot free"></span> Free
       </div>
-
       <div>
-        <span class="legend-dot selected-dot"></span>
-        Your selection
+        <span class="legend-dot selected-dot"></span> Your selection
       </div>
-
       <div>
-        <span class="legend-dot taken"></span>
-        Taken
+        <span class="legend-dot taken"></span> Taken
       </div>
-
       <div>
-        <span class="legend-dot pending-dot"></span>
-        Awaiting payment
+        <span class="legend-dot pending-dot"></span> Awaiting payment
       </div>
     </div>
 
     <div class="reserved-note">
-      <span class="tiny-icon">✓</span>
-      Reserved by the venue
+      <span class="tiny-icon">✓</span> Reserved by the venue
     </div>
 
     <div class="schedule">
@@ -153,7 +257,9 @@ function handleDateChange(event) {
         <thead>
           <tr>
             <th class="time-column">Time</th>
-            <th v-for="court in courts" :key="court">{{ court }}</th>
+            <th v-for="court in courts" :key="typeof court === 'object' ? court.id : court">
+              {{ typeof court === 'object' ? court.name : court }}
+            </th>
           </tr>
         </thead>
 
@@ -161,27 +267,23 @@ function handleDateChange(event) {
           <tr v-for="(time, rowIndex) in timeRows" :key="time">
             <td class="time">{{ time }}</td>
 
-            <td v-for="court in courts" :key="court">
+            <td v-for="court in courts" :key="typeof court === 'object' ? court.id : court">
               <button
                 type="button"
                 class="slot"
-                :class="[
-                  getStatus(court, rowIndex),
-                  { selected: isSelected(court, rowIndex) },
-                ]"
-                @click="toggleSlot(court, rowIndex)"
+                :class="{
+                  'booked slot-disabled': isSlotDisabled(court, rowIndex),
+                  'selected': !isSlotDisabled(court, rowIndex) && isSelected(court, rowIndex)
+                }"
+                :disabled="isSlotDisabled(court, rowIndex)"
+                @click="handleSlotClick(court, rowIndex)"
               >
-                <template v-if="isSelected(court, rowIndex)">
-                  <span class="check">✓</span>
-                  Selected
+                <template v-if="isSlotDisabled(court, rowIndex)">
+                  Taken
                 </template>
 
-                <template v-else-if="getStatus(court, rowIndex) === 'booked'">
-                  Booked
-                </template>
-
-                <template v-else-if="getStatus(court, rowIndex) === 'pending'">
-                  Pending
+                <template v-else-if="isSelected(court, rowIndex)">
+                  <span class="check">✓</span> Selected
                 </template>
 
                 <template v-else>
@@ -198,28 +300,33 @@ function handleDateChange(event) {
 
 <style scoped>
 .booking {
-  background: white;
-  padding: 15px 10px 100px;
+  margin: 16px 12px 0;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 24px;
+  padding: 14px 12px 18px;
+  box-shadow: 0 10px 24px rgba(2, 8, 23, 0.15);
 }
 
 .instruction {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 0 9px 13px;
-  color: #58625f;
+  padding: 4px 8px 12px;
+  color: #cbd5e1;
 }
 
 .info-circle {
-  width: 17px;
-  height: 17px;
-  flex: 0 0 17px;
-  border: 1.5px solid #65716d;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1.5px solid rgba(163, 230, 53, 0.8);
   border-radius: 50%;
   text-align: center;
   font-size: 11px;
   line-height: 15px;
   font-weight: 700;
+  color: #dfff00;
 }
 
 .instruction p {
@@ -231,17 +338,19 @@ function handleDateChange(event) {
 .date-selector {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 3px;
+  gap: 10px;
+  padding: 8px 6px 14px;
 }
 
 .date-selector > button {
-  border: 0;
-  background: transparent;
-  color: #66706c;
-  font-size: 27px;
-  width: 30px;
-  height: 35px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  font-size: 24px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  cursor: pointer;
 }
 
 .date-selector > button:disabled {
@@ -255,10 +364,15 @@ function handleDateChange(event) {
   align-items: center;
   gap: 9px;
   flex: 1;
+  min-height: 44px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
 }
 
 .date strong {
   font-size: 14px;
+  color: #f8fafc;
 }
 
 .hidden-date-input {
@@ -280,12 +394,12 @@ function handleDateChange(event) {
 }
 
 .calendar {
-  color: #18865d;
+  color: #dfff00;
   font-size: 17px;
 }
 
 .date-selector .share {
-  font-size: 19px;
+  font-size: 17px;
 }
 
 .legend {
@@ -293,68 +407,57 @@ function handleDateChange(event) {
   flex-wrap: wrap;
   align-items: center;
   gap: 13px;
-  padding: 7px 9px 3px;
-  color: #68726e;
+  padding: 4px 8px 6px;
+  color: #cbd5e1;
   font-size: 10px;
 }
 
 .legend > div {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
 .legend-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
+  display: inline-block;
 }
 
-.free {
-  background: #258d68;
-}
-
-.selected-dot {
-  background: #83c4a9;
-}
-
-.taken {
-  background: #a9afad;
-}
-
-.pending-dot {
-  background: #e4b97b;
-}
+.free { background: #a3e635; }
+.selected-dot { background: #dfff00; }
+.taken { background: #64748b; }
+.pending-dot { background: #fbbf24; }
 
 .reserved-note {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 9px 10px;
-  color: #68726e;
+  padding: 4px 8px 10px;
+  color: #94a3b8;
   font-size: 10px;
 }
 
-.tiny-icon {
-  color: #83908b;
-}
+.tiny-icon { color: #a3e635; }
 
 .schedule {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  padding-top: 8px;
 }
 
 .schedule table {
   width: 100%;
-  min-width: 400px;
+  min-width: 420px;
   border-collapse: separate;
-  border-spacing: 4px 5px;
+  border-spacing: 4px 6px;
 }
 
 .schedule th {
   height: 30px;
-  color: #3e4744;
+  color: #dbeafe;
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -362,63 +465,60 @@ function handleDateChange(event) {
 
 .schedule th:first-child {
   text-align: left;
-  padding-left: 4px;
+  padding-left: 6px;
 }
 
-.schedule td {
-  padding: 0;
-}
+.schedule td { padding: 0; }
 
 .schedule .time {
-  width: 82px;
-  padding-left: 4px;
+  width: 86px;
+  padding-left: 6px;
   white-space: nowrap;
-  color: #56615d;
+  color: #cbd5e1;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .slot {
   width: 100%;
-  min-height: 45px;
-  border: 1px solid #e0e7e4;
-  border-radius: 11px;
-  background: #f8fbfa;
-  color: #16815c;
+  min-height: 48px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #dfff00;
   font-size: 11px;
   font-weight: 700;
-  transition: 0.15s;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
 }
 
-.slot:hover {
-  background: #eff8f3;
+.slot:hover:not(:disabled) {
+  background: rgba(30, 41, 59, 0.9);
+  border-color: rgba(163, 230, 53, 0.4);
+  box-shadow: 0 0 18px rgba(163, 230, 53, 0.12);
 }
 
-.slot.available {
-  background: #f8fbfa;
-  color: #16815c;
-}
-
-.slot.booked {
-  background: #eef1f0;
-  color: #7c8582;
-  border-color: #e4e9e7;
-}
-
-.slot.pending {
-  background: #fffaf2;
-  color: #986b4c;
-  border-color: #e8d7c7;
+.slot:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .slot.selected {
-  background: #18855f;
-  border-color: #18855f;
-  color: white;
-  box-shadow: 0 2px 6px rgba(24, 133, 95, 0.25);
+  background: linear-gradient(135deg, #dfff00 0%, #a3e635 100%) !important;
+  border-color: rgba(163, 230, 53, 0.8) !important;
+  color: #020817 !important;
+  box-shadow: 0 8px 24px rgba(163, 230, 53, 0.24);
 }
 
-.check {
-  margin-right: 3px;
+.slot:disabled,
+.slot.slot-disabled,
+.slot.booked {
+  background: rgba(71, 85, 105, 0.18) !important;
+  border-color: rgba(148, 163, 184, 0.12) !important;
+  color: #94a3b8 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  box-shadow: none !important;
 }
+
+.check { margin-right: 4px; }
 </style>

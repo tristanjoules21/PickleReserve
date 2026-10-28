@@ -7,7 +7,7 @@ const messages = ref([
     text: 'Hello! How can we assist you with your reservation?',
     time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
   },
-]) 
+])
 
 const draft = ref('')
 

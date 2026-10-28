@@ -1,27 +1,111 @@
 <script setup>
 import {
   Search,
-  Bell,
   Grid2X2,
   CalendarDays,
   Users,
   Settings,
   LogOut,
-  TrendingUp,
-  DollarSign,
   Menu,
   X
 } from 'lucide-vue-next'
 
-import { ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, onMounted, computed } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+import PickleReserveLogo from '@/components/ui/PickleReserveLogo.vue'
+import { getCached } from '@/services/api'
+import AdminNotificationCenter from '@/components/admin/AdminNotificationCenter.vue'
+import { logout } from '@/services/logout'
 
 const sidebarOpen = ref(false)
+const router = useRouter()
 const tableSearch = ref('')
+const isLoading = ref(true)
+
+// Reactive State from Laravel API
+const stats = ref({
+  total_reservations: 0,
+  active_courts: 0,
+  monthly_revenue: 0,
+  today_reservations: 0,
+  daily_capacity: 0,
+  capacity_percentage: 0,
+  total_courts: 0,
+  courts: [],
+  monthly_revenue_change: null,
+  peak_hours_revenue: 0,
+  off_peak_revenue: 0,
+  peak_hours_start: '17:00:00',
+  peak_hours_end: '22:00:00',
+  revenue_by_day: []
+})
+
+const recentReservations = ref([])
+const revenueSparkline = computed(() => {
+  const values = stats.value.revenue_by_day.map((day) => Number(day.revenue))
+  if (values.length < 2) return { line: '', area: '' }
+
+  const min = Math.min(0, ...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const points = values.map((value, index) => ({
+    x: (index / (values.length - 1)) * 400,
+    y: 130 - ((value - min) / range) * 100,
+  }))
+  const line = points.reduce((path, point, index) => {
+    if (index === 0) return `M ${point.x} ${point.y}`
+    const previous = points[index - 1]
+    const midpoint = (previous.x + point.x) / 2
+    return `${path} C ${midpoint} ${previous.y}, ${midpoint} ${point.y}, ${point.x} ${point.y}`
+  }, '')
+
+  return {
+    line,
+    area: `${line} L ${points[points.length - 1].x} 150 L ${points[0].x} 150 Z`,
+  }
+})
+
+const formatCurrency = (value) => Number(value).toLocaleString('en-PH', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+const formatPeakHour = (time) => {
+  const hour = Number(time.slice(0, 2))
+  const displayHour = hour % 12 || 12
+  return `${displayHour}${hour < 12 ? 'AM' : 'PM'}`
+}
+
+// Fetch aggregated dashboard metrics on mount
+const fetchDashboardData = async () => {
+  try {
+    const response = await getCached('/dashboard')
+    stats.value = response.data.metrics
+    recentReservations.value = response.data.recent_reservations
+  } catch (error) {
+    console.error('Failed to fetch dashboard metrics:', error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Compute table rows based on search input
+const filteredReservations = computed(() => {
+  if (!tableSearch.value.trim()) return recentReservations.value
+  const query = tableSearch.value.toLowerCase()
+  return recentReservations.value.filter(
+    (res) =>
+      (res.customer_name && res.customer_name.toLowerCase().includes(query)) ||
+      (res.court?.name && res.court.name.toLowerCase().includes(query)) ||
+      String(res.id).includes(query)
+  )
+})
+
+onMounted(fetchDashboardData)
 </script>
 
 <template>
-  <div class="dashboard">
+  <div class="dashboard pr-admin-skin">
 
     <!-- MOBILE OVERLAY -->
     <div
@@ -42,14 +126,7 @@ const tableSearch = ref('')
 
       <!-- LOGO -->
       <div class="logo">
-
-        <div class="logo-icon">
-          <Grid2X2 :size="17" />
-        </div>
-
-        <div class="logo-name">
-          Pickle<span>Reserve</span>
-        </div>
+        <PickleReserveLogo />
 
         <button
           class="mobile-close"
@@ -90,10 +167,10 @@ const tableSearch = ref('')
           <span>Customers</span>
         </RouterLink>
 
-        <button class="nav-item">
+        <RouterLink to="/settings" class="nav-item" active-class="active" @click="sidebarOpen = false">
           <Settings :size="17" />
           <span>Settings</span>
-        </button>
+        </RouterLink>
 
       </nav>
 
@@ -101,7 +178,7 @@ const tableSearch = ref('')
       <!-- LOGOUT -->
       <div class="logout-area">
 
-        <button class="logout">
+        <button class="logout" @click="logout(router)">
           <LogOut :size="17" />
           <span>Logout</span>
         </button>
@@ -157,13 +234,7 @@ const tableSearch = ref('')
 
           <!-- NOTIFICATION -->
 
-          <button class="notification">
-
-            <Bell :size="18" />
-
-            <span></span>
-
-          </button>
+          <AdminNotificationCenter />
 
 
           <!-- USER -->
@@ -171,7 +242,6 @@ const tableSearch = ref('')
           <div class="user">
 
             <div class="avatar">
-              <!-- Real user image can be added later -->
               <Users :size="15" />
             </div>
 
@@ -201,83 +271,92 @@ const tableSearch = ref('')
         <div class="stats">
 
 
-          <!-- RESERVATIONS -->
-
-          <div class="stat-card">
-
+          <article class="stat-card stat-reservations">
             <div class="stat-top">
-
-              <div class="stat-icon lime">
-                <CalendarDays :size="19" />
+              <div class="stat-title">
+                <span class="stat-icon lime"><CalendarDays :size="18" /></span>
+                <span>Bookings today</span>
               </div>
+              <span class="live-indicator" role="img" aria-label="Live updates"></span>
+            </div>
 
-              <div class="trend">
-                <TrendingUp :size="13" />
-                --
+            <div class="stat-value">{{ isLoading ? '--' : stats.today_reservations }}</div>
+
+            <div class="capacity-summary">
+              <div class="capacity-track" role="progressbar" aria-label="Daily booking capacity"
+                :aria-valuenow="isLoading ? 0 : stats.capacity_percentage" aria-valuemin="0" aria-valuemax="100">
+                <span :style="{ width: `${isLoading ? 0 : stats.capacity_percentage}%` }"></span>
               </div>
+              <span>{{ isLoading ? 'Loading capacity...' : `${stats.capacity_percentage}% of daily capacity filled` }}</span>
+            </div>
+          </article>
 
+          <article class="stat-card stat-courts">
+            <div class="stat-top">
+              <div class="stat-title">
+                <span class="stat-icon yellow"><Grid2X2 :size="18" /></span>
+                <span>Active courts</span>
+              </div>
+            </div>
+
+            <div class="stat-value court-count">
+              <span>{{ isLoading ? '--' : stats.active_courts }}</span>
+              <small>/ {{ isLoading ? '--' : stats.total_courts }} courts</small>
+            </div>
+
+            <div class="court-status-list" aria-label="Court status">
+              <span v-for="court in stats.courts" :key="court.id"
+                class="court-status-pill" :class="{
+                  'court-status-reserved': court.is_active && court.is_reserved_today,
+                  'court-status-open': court.is_active && !court.is_reserved_today,
+                  'court-status-offline': !court.is_active
+                }">
+                <i></i>{{ court.name }}
+                <small>{{ !court.is_active ? 'Offline' : court.is_reserved_today ? 'Reserved' : 'Open' }}</small>
+              </span>
+            </div>
+          </article>
+
+          <article class="stat-card stat-revenue">
+            <div class="stat-top">
+              <div class="stat-title">Monthly revenue</div>
+              <span class="live-indicator" role="img" aria-label="Live updates"></span>
             </div>
 
             <div class="stat-value">
-              --
+              {{ isLoading ? '--' : `₱${formatCurrency(stats.monthly_revenue)}` }}
             </div>
 
-            <div class="stat-label">
-              Reservations
+            <svg v-if="revenueSparkline.line" class="revenue-sparkline" viewBox="0 0 400 160"
+              preserveAspectRatio="none" role="img" aria-label="Daily revenue trend this month">
+              <defs>
+                <linearGradient id="revenue-area-fill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="#a3e635" stop-opacity="0.24" />
+                  <stop offset="100%" stop-color="#a3e635" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <path class="revenue-sparkline-area" :d="revenueSparkline.area" />
+              <path class="revenue-sparkline-line" :d="revenueSparkline.line" />
+            </svg>
+            <div v-else class="revenue-sparkline-empty">
+              More booking history is needed to show a trend.
             </div>
 
-          </div>
-
-
-          <!-- COURTS -->
-
-          <div class="stat-card">
-
-            <div class="stat-top">
-
-              <div class="stat-icon yellow">
-                <Grid2X2 :size="19" />
+            <div class="revenue-footer">
+              <div class="revenue-trend" :class="{ 'revenue-trend-down': stats.monthly_revenue_change < 0 }">
+                <span v-if="stats.monthly_revenue_change !== null">
+                  {{ stats.monthly_revenue_change > 0 ? '+' : '' }}{{ stats.monthly_revenue_change.toFixed(1) }}% vs last month
+                </span>
+                <span v-else>No prior-month baseline</span>
               </div>
-
-            </div>
-
-            <div class="stat-value">
-              --
-            </div>
-
-            <div class="stat-label">
-              Active courts
-            </div>
-
-          </div>
-
-
-          <!-- REVENUE -->
-
-          <div class="stat-card">
-
-            <div class="stat-top">
-
-              <div class="stat-icon blue">
-                <DollarSign :size="19" />
+              <div class="revenue-breakdown">
+                Peak ({{ formatPeakHour(stats.peak_hours_start) }}–{{ formatPeakHour(stats.peak_hours_end) }}):
+                ₱{{ formatCurrency(stats.peak_hours_revenue) }}
+                <span aria-hidden="true">·</span>
+                Off-peak: ₱{{ formatCurrency(stats.off_peak_revenue) }}
               </div>
-
-              <div class="trend">
-                <TrendingUp :size="13" />
-                --
-              </div>
-
             </div>
-
-            <div class="stat-value">
-              ₱--
-            </div>
-
-            <div class="stat-label">
-              Monthly revenue
-            </div>
-
-          </div>
+          </article>
 
         </div>
 
@@ -402,7 +481,21 @@ const tableSearch = ref('')
 
               <tbody>
 
-                <tr>
+                <!-- DYNAMIC DATA ROWS -->
+                <tr v-for="res in filteredReservations" :key="res.id" class="table-row">
+                  <td class="font-semibold">#{{ res.id }}</td>
+                  <td>{{ res.customer_name || 'Guest Customer' }}</td>
+                  <td>{{ res.court?.name || 'Court #' + res.court_id }}</td>
+                  <td>{{ new Date(res.start_time).toLocaleDateString() }}</td>
+                  <td>
+                    <span class="status-badge confirmed">
+                      {{ res.status || 'Confirmed' }}
+                    </span>
+                  </td>
+                </tr>
+
+                <!-- EMPTY STATE -->
+                <tr v-if="filteredReservations.length === 0">
 
                   <td
                     colspan="5"
@@ -481,31 +574,6 @@ const tableSearch = ref('')
   padding: 0 16px;
 
   gap: 8px;
-}
-
-.logo-icon {
-  width: 30px;
-  height: 30px;
-
-  border-radius: 9px;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  color: white;
-  background: #16a34a;
-}
-
-.logo-name {
-  font-size: 16px;
-  font-weight: 750;
-
-  letter-spacing: -0.4px;
-}
-
-.logo-name span {
-  color: #16a34a;
 }
 
 .sidebar-label {
@@ -782,7 +850,7 @@ const tableSearch = ref('')
   display: grid;
 
   grid-template-columns:
-    repeat(4, 1fr);
+    repeat(3, 1fr);
 
   gap: 14px;
 }
@@ -859,7 +927,7 @@ const tableSearch = ref('')
   font-size: 21px;
   font-weight: 750;
 
-  color: #667085;
+  color: #111827;
 }
 
 .stat-label {
@@ -1046,9 +1114,23 @@ th {
 }
 
 td {
-  padding: 28px 14px;
+  padding: 16px 14px;
 
   border-bottom: 1px solid #f0f2f4;
+}
+
+.font-semibold {
+  font-weight: 600;
+  color: #111827;
+}
+
+.status-badge.confirmed {
+  background: #f0fdf4;
+  color: #16a34a;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .empty-table {
@@ -1057,6 +1139,7 @@ td {
   color: #98a2b3;
 
   font-size: 11px;
+  padding: 28px 14px;
 }
 
 
